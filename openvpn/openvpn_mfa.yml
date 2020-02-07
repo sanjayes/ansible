@@ -1,0 +1,39 @@
+---
+- hosts: ec2
+  become: true
+  vars_files: ['openvpn_userpass.yml']
+  tasks:
+          - name: install google-authenticator
+            apt:
+                    name: ['libqrencode3', 'libpam-google-authenticator']
+                    state: latest
+          - name: create a normal user for mfa
+            user:
+                    name: hari
+                    state: present
+                    shell: /bin/bash
+                    update_password: on_create
+                    password: "{{ userpass_hari | password_hash('sha512') }}"
+                   
+          - name: create another user for google-authenticator
+            user:
+                    name: mfa
+          - name: create a directory for google-authenticator
+            file:
+                    path: /etc/openvpn/google-authenticator
+                    state: directory
+                    mode: '0700'
+                    owner: mfa
+                    group: mfa
+          - name: generate token for mfa
+            shell: >
+                   yes "y" | su -c "google-authenticator -t -d -r3 -R30 -f -l "Openvpn_server_hari" -s /etc/openvpn/google-authenticator/hari" - mfa
+          - name: make changes in openvpn file in pam.d
+            lineinfile:
+                    path: "/etc/pam.d/openvpn"
+                    line: "{{ item }}"
+            with_items:
+                    - auth required /lib/x86_64-linux-gnu/security/pam_google_authenticator.so secret=/etc/openvpn/google-authenticator/${USER} user=mfa forward_pass
+                    - auth required pam_unix.so debug use_first_pass
+                    - account required pam_permit.so
+                 

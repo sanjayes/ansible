@@ -1,0 +1,87 @@
+---
+- hosts: ec2
+  become: true
+  vars:
+          app_dir: /home/ubuntu
+  tasks: 
+         - name: create directory for client1
+           file: 
+               path: "{{ app_dir }}/client"
+               state: directory 
+                 
+         - name: build server certificate
+           shell: >
+                      yes "" | ./easyrsa gen-req client1 nopass
+           args:
+                      chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                      executable: /bin/bash
+                      
+         - name: sign the certificate
+           shell: >
+                  yes "yes" | ./easyrsa sign-req client client1
+           args:
+                   chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                   executable: /bin/bash 
+
+         - name: copy client conf file to the newly created folder
+           copy:
+                   remote_src: yes
+                   src: /usr/share/doc/openvpn/examples/sample-config-files/client.conf
+                   dest: "{{ app_dir }}/client/"
+         - name: copy ta key and ca crt
+           copy:
+                   remote_src: yes
+                   src: "/etc/openvpn/{{ item }}"
+                   dest: "{{ app_dir }}/client/"
+           with_items:
+                   - ca.crt
+                   - ta.key
+         - name: copy client key
+           copy:
+                   remote_src: yes
+                   src: "{{ app_dir }}/EasyRSA-v3.0.6/pki/private/client1.key"
+                   dest: "{{ app_dir }}/client/"
+         - name: copy client crt
+           copy:
+                   remote_src: yes
+                   src: "{{ app_dir }}/EasyRSA-v3.0.6/pki/issued/client1.crt"
+                   dest: "{{ app_dir }}/client/"
+         - name: create a new ovpn file
+           copy: 
+                   remote_src: yes
+                   src: "{{ app_dir }}/client/client.conf"
+                   dest: "{{ app_dir }}/client/client1.ovpn"
+         - name: Adjust Openvpn client configuration
+           lineinfile:
+                   dest: "{{ app_dir }}/client/client1.ovpn"
+                   regexp: "^{{ item.regex | regex_escape() }}"
+                   line: "{{ item.value }}"
+           with_items:
+                   - { regex: 'remote my-server-1 1194', value: 'remote 13.232.53.132 1194' }
+                   - { regex: 'tls-auth ta.key 1', value: '#tls-auth ta.key 1' }
+                   - { regex: 'cert client.crt', value: '#cert client.crt' }
+                   - { regex: 'key client.key', value: '#key client.key' }
+                   - { regex: 'ca ca.crt', value: '#ca ca.crt' }
+         - name: add signature
+           shell: "{{ item }}"
+           with_items:
+                   - echo -e auth SHA256 >> "{{ app_dir }}/client/client1.ovpn"
+                   - echo -e key-direction 1 >> "{{ app_dir }}/client/client1.ovpn"
+                   - echo -e '<ca>' >> "{{ app_dir }}/client/client1.ovpn"
+                   - cat "{{ app_dir }}/client/ca.crt" >> "{{ app_dir }}/client/client1.ovpn"
+                   - echo -e '</ca>\n<cert>' >> "{{ app_dir }}/client/client1.ovpn"
+                   - cat "{{ app_dir }}/client/client1.crt" >> "{{ app_dir }}/client/client1.ovpn"
+                   - echo -e '</cert>\n<key>' >> "{{ app_dir }}/client/client1.ovpn"
+                   - cat "{{ app_dir }}/client/client1.key" >> "{{ app_dir }}/client/client1.ovpn"
+                   - echo -e '</key>' >> "{{ app_dir }}/client/client1.ovpn"
+#                   - echo -e '<tls-auth>' >> "{{ app_dir }}/client/client1.ovpn"
+#                   - cat "{{ app_dir }}/client/ta.key" >> "{{ app_dir }}/client/client1.ovpn"
+#                   - echo -e '</tls-auth>' >> "{{ app_dir }}/client/client1.ovpn"
+           args:
+                   chdir: "{{ app_dir }}/client/"
+                   executable: /bin/bash
+         - name: adding user authentication
+           lineinfile:
+                   path: "{{ app_dir }}/client/client1.ovpn"
+                   line: auth-user-pass 
+

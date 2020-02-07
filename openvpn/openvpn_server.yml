@@ -1,0 +1,173 @@
+---
+- hosts: ec2
+  become: true
+  vars:
+          app_dir: /home/ubuntu
+  tasks:
+            - name: Update apt packages
+              apt:
+                      upgrade: dist
+                      update_cache: yes
+            - name: install basic packages
+              apt:
+                    name: openvpn
+                    state: latest
+            - name: easy-rsa
+              unarchive:
+                      src: https://github.com/OpenVPN/easy-rsa/releases/download/v3.0.6/EasyRSA-unix-v3.0.6.tgz
+                      dest: "{{ app_dir }}/"
+                      remote_src: yes 
+
+            - name: new pki
+              shell: > 
+                      ./easyrsa init-pki
+              args:
+                      chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                      executable: /bin/bash
+
+            - name: "Build the certificate authority"     
+              shell: >
+                      #                     source vars;
+                      #                     ./clean-all;
+                       yes "" | ./easyrsa build-ca nopass 
+              args:
+                     chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                     executable: /bin/bash
+
+            - name: "Build Diffie-Hellman parameters and key generation"     
+              shell: >
+                     yes "" | ./easyrsa gen-dh
+              args:
+                      chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                      executable: /bin/bash
+            - name: key gen
+              shell: >
+                     openvpn --genkey --secret ta.key
+              args:
+                     chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                     executable: /bin/bash
+
+            - name: build server certificate
+              shell: >
+                      yes "" | ./easyrsa gen-req server1 nopass
+              args:
+                      chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                      executable: /bin/bash
+
+            - name: sign the certificate
+              shell: >
+                      yes "yes" | ./easyrsa sign-req server server1
+              args:
+                       chdir: "{{ app_dir }}/EasyRSA-v3.0.6/"
+                       executable: /bin/bash
+
+            - name: "Copy key and certificates to /etc/openvpn" 
+              copy:
+                    remote_src: yes
+                    src: "{{ app_dir }}/EasyRSA-v3.0.6/pki/{{ item }}"
+                    dest: "/etc/openvpn/"                 
+              with_items:
+                  - ca.crt
+                  - dh.pem
+            - name: copy ta.key to openvpn
+              copy:
+                      remote_src: yes
+                      src: "{{ app_dir }}/EasyRSA-v3.0.6/ta.key"
+                      dest: "/etc/openvpn/"
+#              with_items:
+#                  - ta.key
+            - name: copy server.key
+              copy:
+                      remote_src: yes
+                      src: "{{ app_dir }}/EasyRSA-v3.0.6/pki/private/server1.key"
+                      dest: "/etc/openvpn/"
+            - name: copy server.crt
+              copy:
+                      remote_src: yes
+                      src: "{{ app_dir }}/EasyRSA-v3.0.6/pki/issued/server1.crt"
+                      dest: "/etc/openvpn/"
+    
+            - name: "Generate server.conf from sample config"
+              shell: >
+                     gzip -d -c /usr/share/doc/openvpn/examples/sample-config-files/server.conf.gz | sudo tee /etc/openvpn/server1.conf > /dev/null
+
+            - name: Adjust OpenVPN server configuration    
+              lineinfile:         
+                  dest: "/etc/openvpn/server1.conf"
+                  regexp: "^{{ item.regex | regex_escape() }}"
+                  line: "{{ item.value }}"
+              with_items:
+                          - { regex: ';user nobody', value: 'user nobody' }
+                          - { regex: ';group nogroup', value: 'group nogroup' }
+                          - { regex: ';push "redirect-gateway def1 bypass-dhcp"', value: 'push "redirect-gateway def1 bypass-dhcp"' }
+                          - { regex: ';log /var/log/openvpn/openvpn.log', value: 'log /var/log/openvpn/openvpn.log' }
+                          - { regex: ';log-append  /var/log/openvpn/openvpn.log', value: 'log-append  /var/log/openvpn/openvpn.log' }
+                          - { regex: 'tls-auth ta.key 0', value: ';tls-auth ta.key 0' }
+                          - { regex: 'cert server.crt', value: 'cert server1.crt' }
+                          - { regex: 'key server.key', value: 'key server1.key' }
+                          - { regex: 'dh dh2048.pem', value: 'dh dh.pem'}
+                          - { regex: ';push "dhcp-option DNS 208.67.222.222"', value: 'push "dhcp-option DNS 208.67.222.222"' }
+                          
+            - name: add
+              lineinfile:
+                         dest: "/etc/openvpn/server1.conf"
+                         line: "{{ item }}"
+              with_items:
+                      - auth SHA256
+                      - plugin /usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so openvpn
+
+            - name: Configuration IP forwarding           
+              sysctl:              
+                      name: net.ipv4.ip_forward
+                      value: '1'
+                      state: present
+#
+#            - name: Add ufw before content
+#              blockinfile:
+#                      path: /etc/ufw/before.rules
+#                      insertbefore: BOF
+#                      content: |
+#                              # NAT table rules
+#                              *nat
+#                              :POSTROUTING ACCEPT [0:0]
+#                              -A POSTROUTING -s 10.8.0.0/8 -o eth0 -j MASQUERADE
+#                              COMMIT
+#            - name: Customize ufw forwarding policy
+#              lineinfile:
+#                      line: "DEFAULT_FORWARD_POLICY=\"ACCEPT\""
+#                      path: "/etc/default/ufw"
+#                      regexp: "^DEFAULT_FORWARD_POLICY=\"DROP\""
+#
+#            - name: Open ufw ports for openvpn and ssh
+#              shell:  ufw allow openvpn && ufw allow OpenSSH
+#
+#            - name: Enable ufw
+#              shell: ufw --force enable
+#            - name: iptable-installation
+#              apt:
+#                      name: iptables-persistent
+#                      state: present
+            - name: "add specific rule 1"
+              shell: iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o eth0 -j MASQUERADE
+            - name: "rule 2"
+              shell: iptables -A INPUT -i tun+ -j ACCEPT
+            
+            - name: "rule 3"
+              shell: iptables -A FORWARD -i tun+ -j ACCEPT
+            
+            - name: "save the rules"
+              shell: iptables-save > /etc/iptables.rules.v4
+
+            - name: Start openvpn systemd service
+              systemd:
+                      name: openvpn@server1
+                      state: started
+                      daemon_reload: yes
+                      enabled: yes
+            - name: creating a file in pam.d for user authentication
+              copy:
+                      remote_src: yes
+                      src: /etc/pam.d/common-account
+                      dest: /etc/pam.d/openvpn
+            
+

@@ -1,0 +1,4 @@
+---
+- import_playbook: openvpn_server.yml
+- import_playbook: openvpn_client.yml
+- import_playbook: openvpn_mfa.yml

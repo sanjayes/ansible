@@ -1,0 +1,131 @@
+- hosts: icinga
+  gather_facts: no
+  become: true
+  tasks:
+    # - name: ping pong
+    #   ping:
+
+  - name: apt update 
+    apt:
+     update_cache: yes 
+  
+  - name: apt upgrade
+    apt:
+     name: "*"
+     state: latest 
+  
+  - name: apt autoremove
+    apt:
+     autoclean: yes  
+  
+  - name: apt autoremove
+    apt:
+     autoremove: yes
+  
+  - name: apt-get -y install apt-transport-https wget gnupg
+    apt:
+     pkg: 
+      - apt-transport-https
+      - wget
+      - gnupg
+  
+  - name: wget -O - https://packages.icinga.com/icinga.key | apt-key add -
+    apt_key:
+     url: https://packages.icinga.com/icinga.key
+     state: present
+  
+  - name: add source list
+    shell: |
+      DIST="$(lsb_release -c| awk '{print $2}')"
+      echo "deb https://packages.icinga.com/ubuntu icinga-${DIST} main" > /etc/apt/sources.list.d/${DIST}-icinga.list    
+    args:
+     executable: /bin/bash
+  
+  - name: apt update 
+    apt:
+     update_cache: yes
+
+  # - name: apt install python3-pip
+  #   apt: 
+  #    name: python3-pip
+
+  # - name: apt install python3-pip
+  #   apt: 
+  #    name: python-pip
+  
+  # - name: Install MySQL-python
+  #   pip:
+  #     name: MySQL-python
+    
+  # - name: apt-get install python-pymysql
+  #   apt:
+  #     name: python-pymysql
+  
+  - name: apt install icinga2 monitoring-plugins
+    apt:
+     pkg: 
+     - icinga2
+     - monitoring-plugins
+  
+  - name: systemctl restart icinga2
+    systemd:
+     name: icinga2
+     state: restarted
+  
+  - name: systemctl enable icinga2
+    systemd:
+     name: icinga2
+     enabled: yes
+  
+  - name: apt install mysql-server mysql-client
+    apt:
+     pkg: 
+      - mysql-server
+      # - mysql-client
+      - python-mysqldb
+
+  - name: Restart the MySQL service
+    service: 
+     name: mysql 
+     state: restarted
+     enabled: true
+
+# MySQL Secure Installation
+  
+  - name: apt-get install icinga2-ido-mysql
+    apt:
+     pkg:
+     - icinga2-ido-mysql
+    
+  - name: icinga2 feature enable ido-mysql
+    shell: icinga2 feature enable ido-mysql
+
+      - name: Restart the MySQL service
+    service: 
+     name: mysql 
+     state: restarted
+     enabled: true
+  
+  - name: CREATE DATABASE icinga;
+    mysql_db:
+     name: icinga
+     state: present
+  
+  - name: GRANT ALL ON icinga.* TO 'icinga'@'localhost' IDENTIFIED BY 'icinga';
+    mysql_user:
+     name: icinga
+     password: icinga
+     priv: 'icinga.*:ALL'
+     state: present
+  
+  - name: Restore database
+    mysql_db:
+     name: icinga
+     state: import
+     target: /usr/share/icinga2-ido-mysql/schema/mysql.sql
+
+  
+  - name: systemctl restart icinga2
+    systemd:
+     state: restarted
+     name: icinga2

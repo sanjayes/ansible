@@ -1,0 +1,26 @@
+---
+- name: EC2 Management
+  hosts: local
+  connection: local
+  tasks:
+
+  # - name: Create Instance
+  #   ec2:
+  #     region: ap-south-1
+  #     key_name: key
+  #     instance_type: t2.micro
+  #     image: ami-0620d12a9cf777c87
+  #     wait: yes
+  #     count: 1
+  #     group: default
+
+  # - name: Terminate Instance
+  #   vars:
+  #     instance_ids:
+  #       - 'i-000bff34bfb5141ec'
+  #       - 'i-00b87fbbde73391f0'
+  #       - 'i-0d193cad557213486'
+  #   ec2:
+  #     region: ap-south-1
+  #     state: absent
+  #     instance_ids: '{{ instance_ids }}'
